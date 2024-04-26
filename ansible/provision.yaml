@@ -1,0 +1,64 @@
+- name: NetPlan
+  hosts: all
+  become: yes
+  tasks:
+
+# Отключим 
+  - name: stop & disable ufw
+    systemd_service:
+      name: ufw
+      state: stopped
+      enabled: false
+
+# Установим traceroute
+  - name: install traceroute
+    apt:
+      name: 
+        - traceroute
+      state: present
+      update_cache: yes
+
+# Установим правила NAT
+  - name: Set up NAT on inetRouter
+    template: 
+      src: "{{ item.src }}"
+      dest: "{{ item.dest }}"
+      owner: root
+      group: root
+      mode: "{{ item.mode }}"
+    with_items:
+      - { src: "templates/iptables_rules.ipv4", dest: "/etc/iptables_rules.ipv4", mode: "0644" }
+      - { src: "templates/iptables_restore", dest: "/etc/network/if-pre-up.d/iptables", mode: "0755" }
+    when: (ansible_hostname == "inetRouter")
+
+# Включим проброс пакетов
+  - name: set up forward packages across routers
+    sysctl:
+      name: net.ipv4.conf.all.forwarding
+      value: '1'
+      state: present
+    when: "'routers' in group_names"      
+
+# Отключим маршрут по умолчанию чтобы в инет ничего не ходило через интерфейсы для vagrant
+  - name: disable default route
+    template: 
+      src: 00-installer-config.yaml
+      dest: /etc/netplan/00-installer-config.yaml
+      owner: root
+      group: root
+      mode: 0644
+    when: (ansible_hostname != "inetRouter")  # Кроме роутера, который смотрит в Интернет 
+
+# Добавим маршруты
+  - name: add default gateway for all hosts
+    template: 
+      src: templates/50-vagrant_{{ansible_hostname}}.yaml
+      dest: /etc/netplan/50-vagrant.yaml
+      owner: root
+      group: root
+      mode: 0644
+
+# Перезапустим все хосты
+  - name: restart all hosts
+    reboot:
+
